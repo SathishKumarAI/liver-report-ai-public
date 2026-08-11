@@ -40,7 +40,7 @@ notices until the chart is empty.
 -normalize -level 20%,80% -sharpen 0x1`, then `--psm 7`:
 
 ```
-Sample No SYN100317  Collection Date 06/03/24 07:15
+Sample No <sample-id>  Collection Date 06/03/24 07:15
 Ack Date 06/03/2024 09:42  Report Date 06/03/24 11:08
 ```
 
