@@ -1,0 +1,63 @@
+name: privacy and tests
+
+# The privacy scan is the gate. A pull request that would add patient data to a
+# public repository fails here rather than being caught by a human afterwards --
+# because "afterwards" is too late: once a public commit is pushed it is forked,
+# cached and indexed, and making the repo private later does not retract it.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  privacy:
+    name: no patient data
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # history too: a clean tree in a dirty history is not clean
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Structural checks that need no denylist
+        run: python tools/ci_privacy_check.py
+
+      # The full pattern denylist cannot live in a public repo -- it contains the
+      # strings it exists to exclude. Maintainers hold it as a repository secret.
+      # When it is absent (forks, first-time contributors) the structural checks
+      # above still run and still block the common failures.
+      - name: Pattern scan
+        if: ${{ env.DENYLIST != '' }}
+        env:
+          DENYLIST: ${{ secrets.PHI_DENYLIST }}
+        run: |
+          printf '%s' "$DENYLIST" > /tmp/denylist.json
+          python tools/scan_phi.py . /tmp/denylist.json --with-history
+          rm -f /tmp/denylist.json
+
+  tests:
+    name: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run the suite
+        run: python -m pytest tests -q
+
+      - name: Rebuild the demo from synthetic data
+        run: |
+          python tools/make_synthetic.py
+          python -m src.build --no-crops || python -c "from src import build; build.main(strict=False, make_crops=False)"
+
+      - name: The built page must make no network requests
+        run: python tools/check_dashboard.py

@@ -1,0 +1,82 @@
+# =====================================================================
+#  This is a PUBLIC repository. It ships invented data only.
+#
+#  If you point this pipeline at a real clinical document, everything it
+#  produces lands in data/ and dist/ — and neither is ever committed.
+#  Read PRIVACY.md before changing anything below.
+# =====================================================================
+
+# ---- Anything derived from, or containing, a real document ----
+data/
+dist/
+
+# ---- Source documents and page renders, wherever they land ----
+*.pdf
+*.jpg
+*.jpeg
+*.png
+*.tif
+*.tiff
+*.webp
+*.dcm
+
+# ---- OCR intermediates (they carry the patient header on every page) ----
+*.tsv
+*.hocr
+ocr/
+
+# ---- Datasets ----
+labs.json
+review.json
+overrides.json
+raw_observations.json
+observations.json
+ground_truth.json
+
+# ---- The denylist the privacy scanner reads. It contains the very strings
+#      it exists to keep out of this repository, so it must never be here. ----
+public_denylist.json
+phi_patterns.txt
+
+# ---- ...and every COPY of a protected file ----
+# A backup of patient data is still patient data.
+*.bak
+*.orig
+*.old
+*.export
+*.dump
+*_phi.*
+*-phi.*
+*copy*
+*Copy*
+*backup*
+*Backup*
+
+# ---- Secrets ----
+.env
+.env.*
+*.key
+*.pem
+credentials*
+token*
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# ---- OS / editor ----
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/
+
+# ---- Explicit re-inclusions: documentation is the point of this repo ----
+!docs/**/*.md
+!.github/**
+!.gitignore
+!.gitattributes
