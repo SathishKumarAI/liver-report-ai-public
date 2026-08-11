@@ -23,6 +23,8 @@ import html
 import json
 
 from . import config as C
+from . import dashboard_interaction as I
+from . import dashboard_range as R
 
 # FHIR interpretation code -> (glyph, letter, severity class). The glyph is the
 # load-bearing part: it survives greyscale printing, the colour does not.
@@ -392,6 +394,8 @@ html.js .panel[hidden]{display:none}.panel{padding:var(--s5) 0 var(--s3)}
  /* Every printed sheet must be attributable; pages 2+ carried nothing. */
  @page{margin:12mm 10mm 14mm;size:A4}}
 """
+
+CSS = CSS + R.CSS
 
 JS = """
 (function(){
@@ -957,13 +961,20 @@ def tab_summary(d: dict) -> str:
                 better += 1
         lo, hi = _ref(obs)
         tiles.append(
-            '<article class="card tile"><div class="thead">'
+            f'<article class="card tile" data-analyte="{_esc(key)}" '
+            f'data-group="{_esc(C.ANALYTES.get(key, {}).get("group", ""))}" '
+            f'data-interp="{_esc(last.get("interpretation") or "")}" '
+            f'data-label="{_esc(_label(key))}" '
+            f'data-tip="{_esc(R.tooltip_text(last))}"><div class="thead">'
             f'<h3 class="tlabel">{_esc(_label(key))}</h3>'
             f'{flag_badge(last.get("interpretation"))}</div>'
             f'<p class="val">{_num(last.get("value"))}<span class="unit">'
             f'{_esc(last.get("unit") or _unit(key))}</span></p>'
             f'{direction(key, dl)}'
             + spark_block([o.get("value") for o in obs], lo, hi)
+            + R.range_gauge(last.get("value"), last.get("reference"),
+                            last.get("unit") or _unit(key))
+            + f'<p class="rtext">{_esc(R.range_text(last.get("value"), last.get("reference"), last.get("unit") or _unit(key)))}</p>'
             + f'<p class="plain">{_esc(C.ANALYTES.get(key, {}).get("plain", ""))}</p></article>')
 
     def moved(n, way):
@@ -1171,12 +1182,19 @@ def tab_trends(d: dict) -> str:
             obs = ser[key]
             lo, hi = _ref(obs)
             out.append(
-                '<article class="card tile"><div class="thead">'
+                f'<article class="card tile" data-analyte="{_esc(key)}" '
+                f'data-group="{_esc(C.ANALYTES.get(key, {}).get("group", ""))}" '
+                f'data-interp="{_esc(obs[-1].get("interpretation") or "")}" '
+                f'data-label="{_esc(_label(key))}" '
+                f'data-tip="{_esc(R.tooltip_text(obs[-1]))}"><div class="thead">'
                 f'<h3 class="tlabel">{_esc(_label(key))}</h3>'
                 f'{flag_badge(obs[-1].get("interpretation"))}</div>'
                 f'<p class="val">{_num(obs[-1].get("value"))}'
                 f'<span class="unit">{_esc(_unit(key))}</span></p>'
-                + spark_block([o.get("value") for o in obs], lo, hi) + "</article>")
+                + spark_block([o.get("value") for o in obs], lo, hi)
+                + R.range_gauge(obs[-1].get("value"), obs[-1].get("reference"), _unit(key))
+                + f'<p class="rtext">{_esc(R.range_text(obs[-1].get("value"), obs[-1].get("reference"), _unit(key)))}</p>'
+                + "</article>")
         out.append("</div>")
     return "".join(out) if len(out) > 1 else out[0] + _empty("No series to chart.")
 
@@ -1367,18 +1385,25 @@ def tab_doctor(d: dict) -> str:
     times = sorted({o.get("collected") for o in d.get("observations", []) if o.get("collected")})
     if not times:
         return "<h2>Flowsheet</h2>" + _empty("No observations.")
-    head = "".join('<th class="n">' + _esc(t.replace("T", "|")).replace("|", "<br>") + "</th>"
-                   for t in times)
+    head = ('<th class="refcol" scope="col">normal range</th>'
+            + "".join('<th class="n" scope="col">'
+                      + _esc(t.replace("T", "|")).replace("|", "<br>") + "</th>"
+                      for t in times))
     rows = []
     for gkey, gname in C.GROUPS.items():
         keys = _group_keys(ser, gkey)
         if not keys:
             continue
-        rows.append(f'<tr><th colspan="{len(times) + 1}">{_esc(gname)}</th></tr>')
+        rows.append(f'<tr><th colspan="{len(times) + 2}">{_esc(gname)}</th></tr>')
         for key in keys:
             obs = ser[key]
             at = {o.get("collected"): i for i, o in enumerate(obs)}
-            cells = []
+            ref = next((o.get("reference") for o in reversed(obs)
+                        if (o.get("reference") or {}).get("low") is not None
+                        or (o.get("reference") or {}).get("high") is not None), None)
+            # The range column is the point of this change: the flowsheet used
+            # to show sixty values with nothing to judge them against.
+            cells = [f'<td class="refcol">{_esc(R.range_label(ref))}</td>']
             for t in times:
                 if t not in at:
                     cells.append('<td class="n tiny">·</td>')
@@ -1388,7 +1413,9 @@ def tab_doctor(d: dict) -> str:
                 shown = _num(o["value"]) if o.get("value") is not None else _esc(o.get("text"))
                 dtxt = (f'<span class="d">{"+" if dl > 0 else "−"}{_num(abs(dl))}</span>'
                         if dl else "")
-                cells.append(f'<td class="n">{shown} {flag_badge(o.get("interpretation"))}{dtxt}</td>')
+                cells.append(
+                    f'<td class="n" title="{_esc(R.tooltip_text(o))}">'
+                    f'{shown} {flag_badge(o.get("interpretation"))}{dtxt}</td>')
             rows.append(f'<tr><td>{_esc(_label(key))} <span class="tiny">{_esc(_unit(key))}'
                         f'</span></td>{"".join(cells)}</tr>')
     crit = "".join(f'<tr><td>{_esc(_label(o.get("analyte")))}</td><td>'
@@ -1879,7 +1906,7 @@ def page_shell(title: str, tabs_html: str, data_json: str, meta: dict | None = N
             '<meta name="robots" content="noindex,nofollow">'
             f'<title>{_esc(title)}</title><style>{CSS}</style>'
             + header_band(title, data, meta)
-            + f'<main class="wrap">{tabs_html}<p class="tiny">Built '
+            + f'<main class="wrap">{I.filter_bar(data)}{tabs_html}<p class="tiny">Built '
             f'{_esc(meta.get("generated", ""))} from '
             f'{_esc(meta.get("source", "the hospital report"))}. This page is self-contained: '
             'it makes no internet connection and needs no network at all.</p></main>'
@@ -1956,3 +1983,17 @@ if __name__ == "__main__":
     assert "spark-band" not in sparkline([14.6, 16.1, 17.4], 0.3, 1.2), "off-chart band drawn"
     assert "spark-band" in sparkline([0.4, 0.9, 1.1], 0.3, 1.2), "in-view band dropped"
     print(f"wrote {out} ({len(page):,} bytes), {len(TABS)} panels, no external refs")
+
+
+# Extra styling for the range components where they sit inside a tile.
+CSS = CSS + """
+.tile .gauge-wrap{margin-top:var(--s2)}
+.rtext{color:var(--subtext);font-size:var(--fs-micro);margin:var(--s2) 0 0;line-height:1.45}
+td.refcol{color:var(--faint);font-size:var(--fs-micro);white-space:nowrap}
+th.refcol{color:var(--faint);font-weight:500}
+"""
+
+
+# ---- interaction layer, appended last so nothing above it is disturbed ----
+CSS = CSS + I.CSS
+JS = JS + I.JS
